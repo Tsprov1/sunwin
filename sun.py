@@ -80,11 +80,15 @@ class BinaryPredictor:
             # Dự đoán
             prediction = self.model.predict(input_array)[0]
             
-            # Lấy xác suất
-            probabilities = self.model.predict_proba(input_array)[0]
-            
-            # Xác suất của kết quả được dự đoán
-            confidence = probabilities[prediction]
+            # Lấy xác suất (an toàn: ánh xạ nhãn sang chỉ số cột theo self.model.classes_)
+            try:
+                probabilities = self.model.predict_proba(input_array)[0]
+                # đảm bảo lấy đúng cột tương ứng với nhãn được dự đoán
+                class_index = list(self.model.classes_).index(prediction)
+                confidence = probabilities[class_index]
+            except AttributeError:
+                # model không hỗ trợ predict_proba (ví dụ một số mô hình tùy chỉnh)
+                confidence = None
             
             return prediction, confidence
         except NotFittedError:
@@ -100,12 +104,30 @@ def main():
     """
     print("--- Công cụ Dự đoán sự xuất hiện của 0 và 1 ---")
     
-    # Dữ liệu mẫu: một chuỗi các số 0 và 1
-    # BẠN NÊN THAY THẾ DỮ LIỆU NÀY BẰNG DỮ LIỆU THỰC TẾ CỦA MÌNH ĐỂ CÓ KẾT QUẢ TỐT HƠN
-    sample_data = [0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0]
+   
+    sample_data = [
+       1,0,0,1,0,1,1,1,0,1,1,1,1,1,1,0,1,1,0,0,1,0,1,1,0,1,1,1,1,0,1,0,1,0,0,1,1,1
+        ]
     
-    # Thiết lập số bước nhìn lại quá khứ để dự đoán
-    look_back_period = 3
+    
+    # Hỏi người dùng muốn dùng bao nhiêu bước nhìn lại (mặc định 3)
+    try:
+        raw = input("Nhập số bước nhìn lại (look_back) mong muốn (mặc định 3): ").strip()
+        if raw == "":
+            look_back_period = 3
+        else:
+            look_back_period = int(raw)
+            if look_back_period < 1:
+                raise ValueError
+    except ValueError:
+        print("Giá trị không hợp lệ, sử dụng mặc định look_back = 3.")
+        look_back_period = 3
+
+    # Nếu look_back lớn hơn dữ liệu mẫu cho phép, hạ xuống tối đa có thể
+    max_possible = max(1, len(sample_data) - 1)
+    if look_back_period > max_possible:
+        print(f"Cảnh báo: look_back quá lớn cho dữ liệu mẫu ({len(sample_data)}). Sẽ sử dụng {max_possible}.")
+        look_back_period = max_possible
     
     # CHỌN LOẠI MÔ HÌNH: 'logistic' hoặc 'dummy'
     # 'dummy' sẽ luôn dự đoán giá trị phổ biến nhất trong dữ liệu, hữu ích để làm cơ sở so sánh.
@@ -116,7 +138,7 @@ def main():
     predictor.train(sample_data)
     
     print("\nBây giờ bạn có thể nhập một chuỗi để dự đoán giá trị tiếp theo.")
-    print(f"Vui lòng nhập chính xác {look_back_period} số (0 hoặc 1), cách nhau bởi dấu cách.")
+    print(f"Vui lòng nhập chính xác {predictor.look_back} số (0 hoặc 1), cách nhau bởi dấu cách.")
     print("Ví dụ: 1 0 1")
     print("Nhập 'exit' để thoát.")
 
@@ -136,8 +158,8 @@ def main():
                  print("Lỗi: Vui lòng chỉ nhập số 0 hoặc 1.")
                  continue
 
-            if len(input_sequence) != look_back_period:
-                print(f"Lỗi: Vui lòng nhập đúng {look_back_period} số.")
+            if len(input_sequence) != predictor.look_back:
+                print(f"Lỗi: Vui lòng nhập đúng {predictor.look_back} số.")
                 continue
 
             # Thực hiện dự đoán
@@ -146,7 +168,10 @@ def main():
             if prediction is not None:
                 print(f"   -> Chuỗi đầu vào: {input_sequence}")
                 print(f"   => Dự đoán số tiếp theo là: {prediction}")
-                print(f"   -> Độ tin cậy (xác suất): {confidence:.2%}")
+                if confidence is None:
+                    print("   -> Độ tin cậy (xác suất): N/A")
+                else:
+                    print(f"   -> Độ tin cậy (xác suất): {confidence:.2%}")
 
         except ValueError:
             print("Lỗi: Đầu vào không hợp lệ. Vui lòng nhập các số 0 hoặc 1, cách nhau bởi dấu cách.")
@@ -155,4 +180,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
