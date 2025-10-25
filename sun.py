@@ -12,6 +12,22 @@ import matplotlib.pyplot as plt
 
 warnings.filterwarnings('ignore', category=UserWarning)
 
+def print_boxed(lines, pad=1):
+    """
+    In một hoặc nhiều dòng (str hoặc list[str]) trong khung ASCII.
+    lines: str hoặc list[str]; pad: số khoảng trống xung quanh nội dung.
+    """
+    if isinstance(lines, str):
+        lines = lines.splitlines()
+    lines = [str(l) for l in lines]
+    maxw = max(len(l) for l in lines) if lines else 0
+    inner_w = maxw + pad*2
+    top = "+" + "-" * (inner_w) + "+"
+    print(top)
+    for l in lines:
+        print("|" + " " * pad + l.ljust(maxw) + " " * pad + "|")
+    print(top)
+
 def create_dataset(data, look_back=3):
     """
     Hàm này chuyển đổi một chuỗi dữ liệu thành một tập dữ liệu phù hợp cho việc học máy.
@@ -94,8 +110,8 @@ class BinaryPredictor:
                 is_special, sp_pred, sp_conf, reason = self.check_special_case(input_sequence)
                 if is_special:
                     # trả về ngay theo luật đặc biệt (không qua model)
-                    # in ngắn gọn lý do (có thể bị tắt nếu cần)
-                    print(f"(Rule applied: {reason})")
+                    # in ngắn gọn lý do (đóng khung)
+                    print_boxed([f"Rule applied: {reason}", f"Prediction: {int(sp_pred)}", f"Confidence: {sp_conf:.2%}" if sp_conf is not None else "Confidence: N/A"])
                     return int(sp_pred), float(sp_conf)
 
             # Nếu có scaler (khi dùng improve_and_train), áp dụng transform
@@ -300,15 +316,20 @@ class BinaryPredictor:
         X, y = create_dataset(data, look_back)
         N = X.shape[0]
         if N == 0:
-            print("Không có mẫu (kiểm tra look_back).")
+            print_boxed("Không có mẫu (kiểm tra look_back).")
             return {"N": 0}
         ones = int(np.sum(y == 1))
         zeros = int(np.sum(y == 0))
-        print("\n--- Thống kê dữ liệu ---")
-        print(f"Số mẫu (N) = {N}  (mỗi mẫu là cửa sổ {look_back} -> 1 label)")
-        print(f"Số lớp 1: {ones}  ({ones/N:.2%}),  Số lớp 0: {zeros}  ({zeros/N:.2%})")
+        lines = [
+            "Thống kê dữ liệu",
+            f"Số mẫu (N) = {N}  (mỗi mẫu = cửa sổ {look_back} -> 1 label)",
+            f"Số lớp 1: {ones}  ({ones/N:.2%})",
+            f"Số lớp 0: {zeros}  ({zeros/N:.2%})"
+        ]
         if N < 10 * look_back:
-            print("Cảnh báo: Số mẫu khá nhỏ so với số đặc trưng (look_back). Cân nhắc giảm look_back hoặc thu thêm dữ liệu.")
+            lines.append("Cảnh báo: Số mẫu nhỏ so với số đặc trưng. Cân nhắc giảm look_back hoặc thu thêm dữ liệu.")
+        print()
+        print_boxed(lines)
         return {"N": N, "ones": ones, "zeros": zeros}
 
     # New: tạo estimator theo model_type (dùng cho learning curve)
@@ -356,11 +377,48 @@ class BinaryPredictor:
         except Exception as e:
             print(f"Không thể vẽ learning curve: {e}")
 
+    # New: simple ASCII learning curve printed to console
+    @staticmethod
+    def plot_learning_curve_ascii(estimator, X, y, scaler=None, cv=5, scoring='f1', width=40):
+        """
+        Tính learning_curve rồi in ra màn hình dạng bảng + thanh ASCII đơn giản.
+        width: chiều rộng tối đa của thanh (số ký tự).
+        """
+        if X.shape[0] == 0:
+            print("Không có dữ liệu để vẽ learning curve.")
+            return
+        # nếu có scaler, gói vào pipeline để tránh leak
+        if scaler is not None:
+            est = Pipeline([('scaler', scaler), ('est', estimator)])
+        else:
+            est = estimator
+
+        try:
+            train_sizes, train_scores, test_scores = learning_curve(
+                est, X, y, cv=cv, scoring=scoring, train_sizes=np.linspace(0.1, 1.0, 5), n_jobs=1
+            )
+            train_mean = np.mean(train_scores, axis=1)
+            test_mean = np.mean(test_scores, axis=1)
+
+            # In bảng tóm tắt
+            print("\n--- Learning curve (ASCII) ---")
+            print(f"{'Train examples':>14} | {'Train '+scoring:>10} | {'Val '+scoring:>10} | {'Train bar':<{width}} | {'Val bar':<{width}}")
+            for n, tr, te in zip(train_sizes.astype(int), train_mean, test_mean):
+                # map scores [0,1] -> bar length
+                tr_len = int(round(tr * width))
+                te_len = int(round(te * width))
+                tr_bar = "#" * tr_len + "-" * (width - tr_len)
+                te_bar = "#" * te_len + "-" * (width - te_len)
+                print(f"{n:14d} | {tr:10.3f} | {te:10.3f} | {tr_bar} | {te_bar}")
+            print("--- end ---\n")
+        except Exception as e:
+            print(f"Không thể tính/vẽ learning curve ASCII: {e}")
+
 def main():
     """
     Hàm chính để chạy giao diện dòng lệnh cho công cụ.
     """
-    print("--- Công cụ Dự đoán sự xuất hiện của 0 và 1 ---")
+    print_boxed("--- Công cụ Dự đoán sự xuất hiện của 0 và 1 ---")
     
    
     sample_data = [ 
@@ -431,8 +489,8 @@ def main():
             est = predictor._estimator_for_type(predictor.model_type, predictor.random_state)
             # nếu trước đó đã dùng scaler trong improve_and_train, dùng scaler ở đây
             scaler = predictor.scaler if getattr(predictor, 'scaler', None) is not None else None
-            print("Đang vẽ learning curve... (có thể mất một chút thời gian)")
-            predictor.plot_learning_curve(est, X_all, y_all, scaler=scaler)
+            print("Đang vẽ learning curve... (dạng ASCII sẽ in ra màn hình)")
+            predictor.plot_learning_curve_ascii(est, X_all, y_all, scaler=scaler)
             continue
 
         # New: bật/tắt luật
@@ -458,12 +516,12 @@ def main():
             prediction, confidence = predictor.predict(input_sequence)
             
             if prediction is not None:
-                print(f"   -> Chuỗi đầu vào: {input_sequence}")
-                print(f"   => Dự đoán số tiếp theo là: {prediction}")
-                if confidence is None:
-                    print("   -> Độ tin cậy (xác suất): N/A")
-                else:
-                    print(f"   -> Độ tin cậy (xác suất): {confidence:.2%}")
+                lines = [
+                    f"Chuỗi đầu vào: {input_sequence}",
+                    f"Dự đoán tiếp theo: {int(prediction)}",
+                    f"Độ tin cậy: {('N/A' if confidence is None else f'{confidence:.2%}') }"
+                ]
+                print_boxed(lines)
 
         except ValueError:
             print("Lỗi: Đầu vào không hợp lệ. Vui lòng nhập các số 0 hoặc 1, cách nhau bởi dấu cách.")
