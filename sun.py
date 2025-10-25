@@ -3,10 +3,12 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.dummy import DummyClassifier
 from sklearn.exceptions import NotFittedError
 import warnings
-from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score, learning_curve
 from sklearn.ensemble import RandomForestClassifier, VotingClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report
+from sklearn.pipeline import Pipeline
+import matplotlib.pyplot as plt
 
 warnings.filterwarnings('ignore', category=UserWarning)
 
@@ -21,10 +23,8 @@ def create_dataset(data, look_back=3):
         return np.array([]), np.array([])
         
     for i in range(len(data) - look_back):
-        # Lấy một đoạn gồm 'look_back' phần tử
         a = data[i:(i + look_back)]
         dataX.append(a)
-        # Lấy phần tử ngay sau đoạn đó làm kết quả
         dataY.append(data[i + look_back])
     return np.array(dataX), np.array(dataY)
 
@@ -294,6 +294,68 @@ class BinaryPredictor:
 
         return False, None, None, None
 
+    # New: thống kê dataset (số mẫu thực tế và tỉ lệ lớp)
+    @staticmethod
+    def dataset_stats(data, look_back=3):
+        X, y = create_dataset(data, look_back)
+        N = X.shape[0]
+        if N == 0:
+            print("Không có mẫu (kiểm tra look_back).")
+            return {"N": 0}
+        ones = int(np.sum(y == 1))
+        zeros = int(np.sum(y == 0))
+        print("\n--- Thống kê dữ liệu ---")
+        print(f"Số mẫu (N) = {N}  (mỗi mẫu là cửa sổ {look_back} -> 1 label)")
+        print(f"Số lớp 1: {ones}  ({ones/N:.2%}),  Số lớp 0: {zeros}  ({zeros/N:.2%})")
+        if N < 10 * look_back:
+            print("Cảnh báo: Số mẫu khá nhỏ so với số đặc trưng (look_back). Cân nhắc giảm look_back hoặc thu thêm dữ liệu.")
+        return {"N": N, "ones": ones, "zeros": zeros}
+
+    # New: tạo estimator theo model_type (dùng cho learning curve)
+    @staticmethod
+    def _estimator_for_type(model_type, random_state=42):
+        if model_type == 'logistic':
+            return LogisticRegression(random_state=random_state, max_iter=2000)
+        if model_type == 'random_forest':
+            return RandomForestClassifier(random_state=random_state, n_estimators=100)
+        if model_type == 'ensemble':
+            lr = LogisticRegression(random_state=random_state, max_iter=2000)
+            rf = RandomForestClassifier(random_state=random_state, n_estimators=100)
+            return VotingClassifier(estimators=[('lr', lr), ('rf', rf)], voting='soft')
+        return DummyClassifier(strategy='most_frequent')
+
+    # New: vẽ learning curve (dùng learning_curve)
+    @staticmethod
+    def plot_learning_curve(estimator, X, y, scaler=None, cv=5, scoring='f1'):
+        if X.shape[0] == 0:
+            print("Không có dữ liệu để vẽ learning curve.")
+            return
+        # nếu có scaler, gói vào pipeline để tránh leak
+        if scaler is not None:
+            pipe = Pipeline([('scaler', scaler), ('est', estimator)])
+            est = pipe
+        else:
+            est = estimator
+        try:
+            train_sizes, train_scores, test_scores = learning_curve(
+                est, X, y, cv=cv, scoring=scoring, train_sizes=np.linspace(0.1, 1.0, 5), n_jobs=1
+            )
+            train_mean = np.mean(train_scores, axis=1)
+            test_mean = np.mean(test_scores, axis=1)
+
+            plt.figure(figsize=(6,4))
+            plt.plot(train_sizes, train_mean, 'o-', label='Train')
+            plt.plot(train_sizes, test_mean, 'o-', label='Validation')
+            plt.title('Learning Curve')
+            plt.xlabel('Training examples')
+            plt.ylabel(scoring)
+            plt.grid(True)
+            plt.legend(loc='best')
+            plt.tight_layout()
+            plt.show()
+        except Exception as e:
+            print(f"Không thể vẽ learning curve: {e}")
+
 def main():
     """
     Hàm chính để chạy giao diện dòng lệnh cho công cụ.
@@ -305,10 +367,12 @@ def main():
 0,1,0,1,0,0,1,0,0,1,0,0,1,0,0,1,0,1,0,0,0,0,1,0,1,0,1,0,0,1,0,1,0,0,1,0,1,1,0,0,0,1,1,1,0,1,0,1,1,0,1,0,1,1,0,1,1,1,0,0,0,0,1,0,1,1,0,1,1,1,0,1,1,1,1,0,1,1,0,0,0,1,0,0,1,1,1,0,1,1,0,1,1,1,1,0,1,0,0,0,
 0,0,0,0,0,1,1,1,1,1,0,0,0,0,1,1,1,1,1,0,0,0,1,0,0,1,1,0,0,1,1,1,1,0,1,1,1,1,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,0,0,1,1,1,0,0,1,1,1,1,0,1,1,1,0,0,1,1,1,0,1,1,1,1,0,1,1,1,1,1,1,0,1,1,1,1,
 1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,1,0,0,1,0,0,1,0,1,0,1,0,1,0,1,1,0,1,0,
-0,0,1,1,0,1,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,1,0,0,1,1,1,0,0,1,1,1,0,0,1,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,1,0,0,1,1,1,0,0,1,1,1,0,0,1,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,0,0,
+0,0,1,1,0,1,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,1,0,0,1,1,1,0,0,1,1,1,0,0,1,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,1,0,0,1,1,1,0,0,1,1,1,0,0,1,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,0,0,
 0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,1,1,0,0,1,1,1,0,0,1,1,1,0,0,0,0,1,0,0,1,1,1,1,1,1,1,1,1,0,0,0,0,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,0,0,1,0,0,1,1,0,1,1,1,0,0,1,1,0,0,1,1,1,1,0,0,
 1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,1,0,1,0,0,0,1,0,1,1,0,0,1,1,0,0,0,0,1,0,1,1,0,0,1,0,1,0,
-0,1,0,1,0,1,1,0,1,0,0,1,0,1,0,1,0,1,0,1,0,0,1,1,0,0,0,1,1,0,1,1,0,0,1,0,1,0
+0,1,0,1,0,1,1,0,1,0,0,1,0,1,0,1,0,1,0,1,0,0,1,1,0,0,0,1,1,0,1,1,0,0,1,0,1,0,
+0,0,1,1,0,1,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,0,1,1,1,1,1,0,1,1,1,0,0,1,1,1,0,1,1,1,1,0,0,0,1,1,1,0,1,1,0,1,1,1,0,0,1,1,1,0,1,1,0,0,0,0,1,1,1,0,0,1,1,0,1,1,1,0,1,1,0,1,1,1,1,0,0,0,1,1,0,0,1,1,1,1,1,0,0,1,1,0,1,1,1,1,1,0,0,
+1,0,1,0,1,0,1,0,0,1,0,1,0,1,0,1,0,1,0,1,1,0,1,0,1,0,1,0,1,0,1,1,0,1,1,0,1,1,1,0,1,0,1,1,0
 
   
                 ]
@@ -341,11 +405,15 @@ def main():
     predictor = BinaryPredictor(look_back=look_back_period, model_type=model_choice)
     predictor.train(sample_data)
     
+    # New: in thống kê dataset
+    predictor.dataset_stats(sample_data, look_back_period)
+
     print("\nBây giờ bạn có thể nhập một chuỗi để dự đoán giá trị tiếp theo.")
     print(f"Vui lòng nhập chính xác {predictor.look_back} số (0 hoặc 1), cách nhau bởi dấu cách.")
     print("Ví dụ: 1 0 1")
     print("Nhập 'exit' để thoát.")
     print("Lệnh thêm: 'rules on' / 'rules off' để bật/tắt luật xử lý trường hợp đặc biệt.")
+    print("        'plot' hoặc 'curve' để vẽ learning curve cho loại mô hình hiện tại.")
 
     while True:
         user_input = input("\nNhập chuỗi của bạn: ").strip().lower()
@@ -353,6 +421,19 @@ def main():
         if user_input == 'exit':
             print("Cảm ơn bạn đã sử dụng công cụ!")
             break
+
+        # xử lý lệnh vẽ learning curve
+        if user_input in ('plot', 'curve'):
+            X_all, y_all = create_dataset(sample_data, predictor.look_back)
+            if X_all.shape[0] == 0:
+                print("Không đủ dữ liệu để vẽ.")
+                continue
+            est = predictor._estimator_for_type(predictor.model_type, predictor.random_state)
+            # nếu trước đó đã dùng scaler trong improve_and_train, dùng scaler ở đây
+            scaler = predictor.scaler if getattr(predictor, 'scaler', None) is not None else None
+            print("Đang vẽ learning curve... (có thể mất một chút thời gian)")
+            predictor.plot_learning_curve(est, X_all, y_all, scaler=scaler)
+            continue
 
         # New: bật/tắt luật
         if user_input in ('rules on', 'rules off'):
